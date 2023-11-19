@@ -1,0 +1,73 @@
+from machine import Pin, SPI, PWM, time_pulse_us
+from ssd1306 import SSD1306_SPI
+import time
+
+# Constants
+SOUND_SPEED = 340  # Speed of sound in m/s
+TRIG_PULSE_DURATION_US = 10
+FAR_LIMIT = 1  # distance in cm
+NEAR_LIMIT = 0.7  # distance in cm
+CLOSE_LIMIT = 0.5  # distance in cm
+BUZZER_FREQUENCY_FAR = 2  # Hz for rare beeps
+BUZZER_FREQUENCY_NEAR = 4  # Hz for frequent beeps
+
+# Pin definitions
+trig_pin = Pin(15, Pin.OUT)  # HC-SR04 trig pin
+echo_pin = Pin(14, Pin.IN)  # HC-SR04 echo pin
+spi = SPI(0, 100000, mosi=Pin(19), sck=Pin(18))  # SPI for OLED
+oled = SSD1306_SPI(128, 64, spi, Pin(17), Pin(20), Pin(16))  # OLED display
+buzzer = PWM(Pin(2))  # Buzzer
+def beep(frequency, beep_duration_ms, pause_duration_ms):
+    buzzer.freq(frequency)
+    buzzer.duty_u16(1000)  # Set volume
+    time.sleep_ms(beep_duration_ms)
+    buzzer.duty_u16(0)  # Turn off for silence
+    time.sleep_ms(pause_duration_ms)
+
+def beep_continuous(frequency):
+    buzzer.freq(frequency)
+    buzzer.duty_u16(1000)  # Set volume
+
+def stop_buzzer():
+    buzzer.duty_u16(0)  # Turn off the buzzer
+
+def display_distance(distance_m):
+    oled.fill(0)  # Clear the display
+    oled.text(f"Distance: {distance_m:.2f} m", 0, 0)
+    # Display a bar graph representation of distance
+    bar_length = max(0, 128 - int((distance_m / FAR_LIMIT) * 128))
+    oled.fill_rect(0, 20, bar_length, 10, 1)
+    oled.show()
+    
+while True:
+    # Send pulse
+    trig_pin.value(0)
+    time.sleep_us(5)
+    trig_pin.value(1)
+    time.sleep_us(TRIG_PULSE_DURATION_US)
+    trig_pin.value(0)
+
+    # Calculate distance
+    duration = time_pulse_us(echo_pin, 1, 30000)
+    distance_m = (SOUND_SPEED * (duration / 1_000_000)) / 2
+
+    # Debugging: Print the distance
+    print(f"Distance: {distance_m} m")
+
+    # Display distance
+    display_distance(distance_m)
+
+    # Beep logic based on distance
+    if distance_m <= CLOSE_LIMIT:
+        beep_continuous(1000)  # Continuous tone
+    elif distance_m <= NEAR_LIMIT:
+        beep(500, 200, 200)  # More frequent beeps
+        stop_buzzer()  # Ensure to stop after the beep
+    elif distance_m <= FAR_LIMIT:
+        beep(200, 100, 500)  # Less frequent beeps
+        stop_buzzer()  # Ensure to stop after the beep
+    else:
+        stop_buzzer()  # No beep
+
+    time.sleep(0.1)  # Small delay to prevent echo effects
+
