@@ -1,0 +1,151 @@
+from machine import Pin, SPI, time_pulse_us
+from ssd1306 import SSD1306_SPI
+import time
+import utime
+
+# Constants
+SOUND_SPEED = 340  # Speed of sound in m/s
+TRIG_PULSE_DURATION_US = 10
+MEASURE_DISTANCE = 0.5  # Distance at which speed is checked, in meters
+SPEED_THRESHOLD = 1.0  # Speed threshold in m/s
+RED_LED_PIN = 4  # Red pin of the RGB LED
+AVERAGE_COUNT = 5  # Number of measurements to average
+UPDATE_INTERVAL = 100  # Update interval in milliseconds
+CAPTURE_DISPLAY_TIME = 1500  # Time to display captured speed in milliseconds
+
+# Pin definitions
+trig_pin = Pin(15, Pin.OUT)
+echo_pin = Pin(14, Pin.IN)
+spi = SPI(0, 100000, mosi=Pin(19), sck=Pin(18))
+oled = SSD1306_SPI(128, 64, spi, Pin(17), Pin(20), Pin(16))
+red_led = Pin(RED_LED_PIN, Pin.OUT)
+
+def measure_distance():
+    trig_pin.value(0)
+    time.sleep_us(5)
+    trig_pin.value(1)
+    time.sleep_us(TRIG_PULSE_DURATION_US)
+    trig_pin.value(0)
+    duration = time_pulse_us(echo_pin, 1, 30000)
+    return (SOUND_SPEED * (duration / 1_000_000)) / 2
+
+def draw_large_digit(oled, digit, x, y, width, height):
+    # This function will draw a single large digit
+    # For simplicity, it only covers digits 0-9
+    # Each digit is represented by a series of rectangles (or lines)
+
+    # Maps of which parts of the digit to draw for each number
+    digit_maps = {
+        0: [True, True, True, False, True, True, True],
+        1: [False, False, True, False, False, True, False],
+        2: [True, False, True, True, True, False, True],
+        3: [True, False, True, True, False, True, True],
+        4: [False, True, True, True, False, True, False],
+        5: [True, True, False, True, False, True, True],
+        6: [True, True, False, True, True, True, True],
+        7: [True, False, True, False, False, True, False],
+        8: [True, True, True, True, True, True, True],
+        9: [True, True, True, True, False, True, True]
+    }
+
+    map = digit_maps[digit]
+
+    # Define the segments
+    # You will need to adjust the coordinates based on your desired size and position
+    segments = [
+    (x, y, width, 2, 1),               # Top
+    (x, y, 2, height // 2, 1),         # Top left
+    (x + width - 2, y, 2, height // 2, 1), # Top right
+    (x, y + height // 2 - 2, width, 2, 1), # Middle
+    (x, y + height // 2, 2, height // 2, 1), # Bottom left
+    (x + width - 2, y + height // 2, 2, height // 2, 1), # Bottom right
+    (x, y + height - 2, width, 2, 1)   # Bottom
+]
+
+
+    for i, segment in enumerate(segments):
+        if map[i]:
+            oled.fill_rect(*segment)
+
+def display_info(oled, speed, distance, fixed=False):
+    oled.fill(0)  # Clear the display
+    if fixed:
+        # Extracting individual digits
+        tens_digit = int(speed) // 10
+        units_digit = int(speed) % 10
+        decimal_digit = int(speed * 10) % 10
+
+        # Calculate the position for each digit
+        # Increase spacing between digits
+        tens_x = 0
+        units_x = 10  # Increased gap between tens and units
+        decimal_x = 50  # Adjusted position for decimal digit
+        decimal_point_x = 38  # Adjusted position for decimal point
+        digit_width = 15
+        digit_height = 30
+
+        # Display large digits
+        if tens_digit > 0:
+            draw_large_digit(oled, tens_digit, tens_x, 0, digit_width, digit_height)  # Tens place
+        draw_large_digit(oled, units_digit, units_x, 0, digit_width, digit_height)  # Units place
+        # Draw a larger decimal point
+        oled.fill_rect(decimal_point_x, digit_height - 10, 4, 4, 1)  # Enlarged decimal point
+        draw_large_digit(oled, decimal_digit, decimal_x, 0, digit_width, digit_height)  # Decimal place
+    else:
+        # Regular display
+        oled.text(f"Speed: {speed:.2f} m/s", 0, 0)
+        oled.text(f"Dist: {distance:.2f} m", 0, 10)
+
+    oled.show()
+
+
+
+
+def flash_red_led():
+    red_led.value(1)
+    time.sleep(0.1)  # Flash duration
+    red_led.value(0)
+
+distance_buffer = [measure_distance() for _ in range(AVERAGE_COUNT)]
+speed_buffer = []
+previous_time = utime.ticks_ms()
+captured = False  # Flag to indicate if the speed has been captured
+
+while True:
+    current_time = utime.ticks_ms()
+    if utime.ticks_diff(current_time, previous_time) >= UPDATE_INTERVAL:
+        current_distance = measure_distance()
+
+        time_diff = utime.ticks_diff(current_time, previous_time) / 1000  # Convert to seconds
+        if time_diff > 0:
+            # Calculate speed
+            speed = (distance_buffer[0] - current_distance) / time_diff
+
+            # Add speed to buffer and calculate average speed
+            speed_buffer.append(speed)
+            if len(speed_buffer) > AVERAGE_COUNT:
+                speed_buffer.pop(0)
+            avg_speed = sum(speed_buffer) / len(speed_buffer)
+
+            # Check if the object is within the distance and above speed threshold
+            if current_distance <= MEASURE_DISTANCE and avg_speed >= SPEED_THRESHOLD:
+                if not captured:
+                    display_info(oled, avg_speed, current_distance, fixed=True)
+                    flash_red_led()
+                    captured = True  # Set the captured flag
+                    utime.sleep_ms(CAPTURE_DISPLAY_TIME)  # Hold the display for a set duration
+            else:
+                captured = False  # Reset the captured flag if conditions are not met
+
+            if not captured:
+                # Update display with current speed and distance
+                display_info(oled, avg_speed, current_distance)
+
+
+        # Update distance buffer and time
+        distance_buffer.pop(0)
+        distance_buffer.append(current_distance)
+        previous_time = current_time
+
+    utime.sleep(0.01)  # Reduced delay for more frequent measurements
+
