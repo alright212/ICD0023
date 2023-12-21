@@ -1,0 +1,43 @@
+from machine import Pin
+from ir_tx.nec import NEC
+import time
+
+# Define the GPIO pins for the buttons
+forward_button = Pin(13, Pin.IN, Pin.PULL_UP)
+left_button = Pin(12, Pin.IN, Pin.PULL_UP)
+right_button = Pin(11, Pin.IN, Pin.PULL_UP)
+stop_button = Pin(10, Pin.IN, Pin.PULL_UP)
+
+# Define the GPIO pin for the IR LED
+ir_led = Pin(17, Pin.OUT)  # Change as needed based on your setup
+
+# Initialize the NEC protocol transmitter
+nec = NEC(ir_led)
+
+# IR Codes for each command
+forward_code = 0x42
+left_code = 0x44
+right_code = 0x45
+stop_code = 65
+
+# IR address
+address = 0xc7ea
+
+def send_ir_command(code):
+    nec.transmit(address, code)  # Transmitting with the specified address
+    time.sleep(0.5)  # Prevents button bouncing and rapid repeat
+
+while True:
+    if not forward_button.value():  # Button press detected when low
+        print("Forward button pressed")
+        send_ir_command(forward_code)
+    elif not left_button.value():  # Button press detected when low
+        print("Left button pressed")
+        send_ir_command(left_code)
+    elif not right_button.value():  # Button press detected when low
+        print("Right button pressed")
+        send_ir_command(right_code)
+    elif not stop_button.value():  # Button press detected when low
+        print("Stop button pressed")
+        send_ir_command(stop_code)
+
